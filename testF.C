@@ -16,8 +16,10 @@ TH1F* hdca=0,*hdcaN=0;
 TH1F* hdcaZ=0,*hdcaZN=0;
 TH1F* hFdca=0,*hFdcaN=0;
 TH1F* hFdcaZ=0,*hFdcaZN=0;
+TH1F* hPatternITS=0;
+TH1F* hFPatternITS=0;
 
-void testF(int ntrials=10000, double dndy=300.)
+void testF(int ntrials=10000, double dndy=2100., Bool_t useKalmanOut=kTRUE)
 {
 #if defined(__CINT__) && !defined(__MAKECINT__)
   gSystem->Load("libITSUpgradeBase.so");
@@ -33,6 +35,7 @@ void testF(int ntrials=10000, double dndy=300.)
   det->SetSimMat(kTRUE);
   det->SetMaxStepTGeo(1.);
   det->SetdNdY(dndy);
+  det->SetUseKalmanOut(useKalmanOut);
   //
   hdca  = new TH1F("hdca","dca",  100,-0.1,.1);
   hdcaN = new TH1F("hdcaN","dcaN",100,-10.,10.);
@@ -43,6 +46,9 @@ void testF(int ntrials=10000, double dndy=300.)
   hFdcaN = new TH1F("hFdcaN","dcaN fake",100,-10.,10.);
   hFdcaZ  = new TH1F("hFdcaZ","dcaZ fake",  100,-0.1,.1);
   hFdcaZN = new TH1F("hFdcaZN","dcaZN fake",100,-10.,10.);
+  //
+  hPatternITS  = new TH1F("itsPattern","ITS hits pattern"      ,7,-0.5,6.5);
+  hFPatternITS = new TH1F("itsFPattern","ITS fake hits pattern",7,-0.5,6.5);
   //
   AliESDVertex *vtx = new AliESDVertex();
   double vcov[6] = {1e-4, 0, 1e-4, 0, 0, 1e-4};
@@ -81,15 +87,18 @@ void testF(int ntrials=10000, double dndy=300.)
       hdcaZ->Fill(dca[1]);
       hdcaZN->Fill(dca[1]/TMath::Sqrt(cov[2]));
       //
-      //    /*
       if (det->GetNClITSFakes()) {
 	hFdca->Fill(dca[0]);
 	hFdcaN->Fill(dca[0]/TMath::Sqrt(cov[0]));
 	hFdcaZ->Fill(dca[1]);
 	hFdcaZN->Fill(dca[1]/TMath::Sqrt(cov[2]));
       }
-      //      */
-      //      */
+      int hits  = det->GetITSPattern();
+      int hitsF = det->GetITSPatternFakes();
+      for (int j=7;j--;) {
+	if (hits&(0x1<<j))  hPatternITS->Fill(j);
+	if (hitsF&(0x1<<j)) hFPatternITS->Fill(j);	
+      }
     }
   }
   //

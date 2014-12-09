@@ -6,7 +6,7 @@
 #include "AliESDpid.h"
 #include "AliPIDResponse.h"
 
-//#define DEBUG
+#define DEBUG 11
 
 class AliITSUReconstructor;
 class AliITSURecoDet;
@@ -86,6 +86,8 @@ class FT2 : public TObject
   Double_t GetChi2TPC() const {return fChi2TPC;}
   FTProbe& GetProbe() const {return (FTProbe&)fProbe;}
   AliExternalTrackParam& GetKalmanOut(int i) {return (AliExternalTrackParam&)fKalmanOutward[i];}
+  void   SetUseKalmanOut(Bool_t v=kTRUE)  {fUseKalmanOut = v;}
+  Bool_t GetUseKalmanOut()   const {return fUseKalmanOut;}
   //
   const Double_t* GetDCA()    const {return &fDCA[0];}
   const Double_t* GetDCACov() const {return &fDCACov[0];}
@@ -97,6 +99,8 @@ class FT2 : public TObject
   Double_t HitDensity(double r2, double tgl) const;
   Bool_t   BiasAsFake(double yz[2], const double* extyz, const double *cov) const;
   Bool_t DiagonalizeErrors(const double *cov, double &sy2d, double &sz2d);
+  Int_t  GetITSPattern() const {return fITSPattern;}
+  Int_t  GetITSPatternFakes() const {return fITSPatternFake;}
   //
  protected:
   void AddTPC(Float_t sigY=0.1, Float_t sigZ=0.1, Float_t eff=0.99, Float_t scEdge=2.6);
@@ -136,13 +140,17 @@ class FT2 : public TObject
   //
   FTProbe fProbe;  // track
   AliExternalTrackParam* fKalmanOutward; //! parameters of outward kalman 
+  Bool_t  fUseKalmanOut;                 //! use KalmanOut estimate for fakes
   //Double_t              fProbeMass; // probe mass
   Double_t              fBz;        // bz
   Bool_t                fSimMat;    // simulate material effects in probe preparation
   //
+  Int_t                 fCurrITSLr; //! current ITS layer under tracking
   Int_t                 fNClTPC;    //! N used TPC clusters
   Int_t                 fNClITS;    //! N used ITS clusters
   Int_t                 fNClITSFakes;    //! N used ITS Fake clusters
+  Int_t                 fITSPatternFake; //! fakes pattern for ITS
+  Int_t                 fITSPattern;     //! pattern for ITS clusters
   Double_t              fChi2TPC;   //! total chi2 in TPC
   Double_t              fChi2ITS;   //! total chi2 in ITS
   //
