@@ -718,7 +718,7 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
       trCov[0] = si11/det;
       trCov[2] = si00/det;
       trCov[1] = -si01/det;
-#if DEBUG>5
+#if DEBUG//>5
       printf("Errors on Lr %d: \n",fCurrITSLr);
       printf("Inward  :  %+e %+e %+e\n",covInw[0],covInw[1],covInw[2]);
       printf("Outward :  %+e %+e %+e\n",covOut[0],covOut[1],covOut[2]);
@@ -727,7 +727,7 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
     }
     else for (int i=3;i--;) trCov[i] = covInw[i];
     //
-    if (!DiagonalizeErrors(trc->GetCovariance(),err2a,err2b)) {
+    if (!DiagonalizeErrors(trCov,err2a,err2b)) {
 #if DEBUG
       printf("Failed to diagonalize erros\n"); trc->Print();
 #endif
@@ -738,10 +738,13 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
     double rho = HitDensity(xyz[0]*xyz[0]+xyz[1]*xyz[1],trc->GetTgl());
     //
     // prob. of good hit (http://rnc.lbl.gov/~wieman/HitFinding2D.htm)
-    Double_t sx, sy, probFake;
-    sx = 2 * TMath::Pi()*err2a*rho;
-    sy = 2 * TMath::Pi()*err2b*rho;
-    probFake = 1.-TMath::Sqrt(1./((1+sx)*(1+sy)));
+    Double_t sx2, sy2, probFake;
+    sx2 = 2 * TMath::Pi()*err2a*rho;
+    sy2 = 2 * TMath::Pi()*err2b*rho;
+    probFake = 1.-TMath::Sqrt(1./((1+sx2)*(1+sy2)));
+#if DEBUG
+    printf("DiagErr: %e %e Rho:%e PFake: %e\n",err2a,err2b, rho, probFake);
+#endif
     if (gRandom->Rndm()<probFake) { // need to fake the hit
       BiasAsFake(meas, trc->GetParameter(), trCov);
       if (fCurrITSLr>=0) {
@@ -756,11 +759,11 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
   }
   //
   double chi2 = trc->GetPredictedChi2(meas,measErr2);
-
-  printf("Updating {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d -> %f\n", meas[0],meas[1],y,z,
-	 measErr2[0],measErr2[1],measErr2[2],fNClITS,fNClITSFakes,chi2); 
+  if (fake) {
+    printf("Updating {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d -> %f\n", meas[0],meas[1],y,z,
+	   measErr2[0],measErr2[1],measErr2[2],fNClITS,fNClITSFakes,chi2); 
     trc->Print();
-
+  }
   if (!trc->Update(meas,measErr2)) {
 #if DEBUG
     printf("Failed to Update {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d\n", meas[0],meas[1],y,z,
@@ -1174,7 +1177,8 @@ Bool_t FT2::DiagonalizeErrors(const double* cov, double &sy2d, double &sz2d)
   double sd = cov[0]+cov[2];
   sy2d = 0.5*(sd - dd);
   sz2d = 0.5*(sd + dd);
-  return sy2d >0 ? kTRUE:kFALSE;
+  if (sy2d<=0 || sz2d<=0) return kFALSE;
+  return kTRUE;
 }
 
 //_____________________________________________
@@ -1208,7 +1212,7 @@ Bool_t FT2::BiasAsFake(double yz[2], const double* extyz, const double *cov) con
     d2 = dy*dy*r00+dz*dz*r11+2.*dy*dz*r01;
   }
   //
-  //  printf("AddFake %f %f Chi2: %f\n",dy,dz, d2max);
+  printf("AddFake DY:%f DZ:%f Chi2Max:%f Chi2F:%f\n",dy,dz, d2max,d2);
   yz[0] = extyz[0]+dy;
   yz[1] = extyz[1]+dz;
   return kTRUE;
