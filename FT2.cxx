@@ -279,12 +279,19 @@ Bool_t FT2::ProcessTrack(TParticle* part, AliVertex* vtx)
     vtx0.SetCovarianceMatrix(&vd[0]);
     first = kFALSE;
   }
-  if (!InitProbe(part)) return kFALSE;
+  if (!InitProbe(part)) {
+#if DEBUG
+    printf("Initialization failed\n");
+    part->Print();
+    fProbe.Print();
+#endif
+    return kFALSE;
+  }
   PrepareProbe();
   //
   // check if there is something to reconstruct
   if ( (fIsTPC && fNTPCHits<fMinTPCHits) || (fNITSLrHit<fMinITSLrHit)) {
-#if DEBUG>3
+#if DEBUG
     printf("Track hit requirements are not satisfied: Hit ITS Layers: %d (need %d) TPCHits: %d (need %d)\n",
 	   fNITSLrHit,fMinITSLrHit, fNTPCHits, fIsTPC ? fMinTPCHits:0);
     fProbe.Print();
@@ -294,15 +301,35 @@ Bool_t FT2::ProcessTrack(TParticle* part, AliVertex* vtx)
 	
   ResetCovMat(&fProbe);
   //
-  if (!ReconstructProbe()) return kFALSE;
+  if (!ReconstructProbe()) {    
+#if DEBUG
+    printf("Track reconstruction failed\n");
+    fProbe.Print();
+#endif
+    return kFALSE;
+  }
   //
   // go to innermost radius of ITS (including beam pipe)
-  if (!PropagateToR(fITS->GetRMin(),-1, kTRUE, kFALSE, kTRUE)) return kFALSE; // don't exit on faile propagation, may simply not reach this point
+  if (!PropagateToR(fITS->GetRMin(),-1, kTRUE, kFALSE, kTRUE)) {
+#if DEBUG
+    printf("Track propagatation to ITS RMin=%f failed\n",fITS->GetRMin());
+    fProbe.Print();
+#endif  
+    return kFALSE; // don't exit on faile propagation, may simply not reach this point
+  }
   //
   AliVertex* vtuse = vtx ? vtx : (AliVertex*)&vtx0; // if no vertex provided, relate to 0,0,0
   //
   fDCACov[0] = fDCACov[1] = fDCACov[2] = 0;
   Bool_t res = fProbe.PropagateToDCA(vtuse,fBz, fITS->GetRMin(), fDCA, fDCACov);
+
+#if DEBUG
+  if (!res) {
+    printf("Track propagation to vertex failed\n");
+    vtuse->Print();
+    fProbe.Print();
+  }
+#endif  
   //
   /*
     printf("Tracking done: NclITS: %d (chi2ITS=%.3f) NclTPC: %3d (chi2TPC=%.3f)\n",fNClITS,fChi2ITS,fNClTPC,fChi2TPC);
@@ -666,14 +693,28 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
       double* covOut = (double*)fKalmanOutward[fCurrITSLr].GetCovariance();
       double detInw = covInw[0]*covInw[2]-covInw[1]*covInw[1];
       double detOut = covOut[0]*covOut[2]-covOut[1]*covOut[1];
-      if (detInw<1e-16 || detOut<1e-16) return -1;
+      if (detInw<1e-16 || detOut<1e-16) {
+#if DEBUG
+	AliInfoF("Failed Update for fakes: detInw: %e detOutw: %e",detInw,detOut);
+	printf("Inward:  ");trc->Print();
+	printf("Outward: ");fKalmanOutward[fCurrITSLr].Print();	
+#endif
+	return -1;
+      }
       detInw = 1./detInw;
       detOut = 1./detOut;
       double si00 = covInw[2]*detInw+covOut[2]*detOut;
       double si11 = covInw[0]*detInw+covOut[0]*detOut;
       double si01 =-covInw[1]*detInw-covOut[1]*detOut;
       double det = si00*si11-si01*si01;
-      if (det<1e-16) return -1;
+      if (det<1e-1) {
+#if DEBUG
+	AliInfoF("Failed Update for fakes: detFinal: %e",det);
+	printf("Inward:  ");trc->Print();
+	printf("Outward: ");fKalmanOutward[fCurrITSLr].Print();	
+#endif
+	return -1;
+      }
       trCov[0] = si11/det;
       trCov[2] = si00/det;
       trCov[1] = -si01/det;
@@ -715,7 +756,19 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
   }
   //
   double chi2 = trc->GetPredictedChi2(meas,measErr2);
-  if (!trc->Update(meas,measErr2)) return -1;
+
+  printf("Updating {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d -> %f\n", meas[0],meas[1],y,z,
+	 measErr2[0],measErr2[1],measErr2[2],fNClITS,fNClITSFakes,chi2); 
+    trc->Print();
+
+  if (!trc->Update(meas,measErr2)) {
+#if DEBUG
+    printf("Failed to Update {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d\n", meas[0],meas[1],y,z,
+	   measErr2[0],measErr2[1],measErr2[2],fNClITS,fNClITSFakes); 
+    trc->Print();
+#endif
+     return -1;
+  }
   return chi2;
 }
 

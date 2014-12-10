@@ -100,6 +100,9 @@ void testF(int ntrials=10000, double dndy=2100., Bool_t useKalmanOut=kTRUE)
 	if (hitsF&(0x1<<j)) hFPatternITS->Fill(j);	
       }
     }
+    else {
+      printf("Failed on track %d\n",ntr);
+    }
   }
   //
 }

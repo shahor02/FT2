@@ -6,7 +6,8 @@
 #include "AliESDpid.h"
 #include "AliPIDResponse.h"
 
-#define DEBUG 11
+//#define DEBUG 11
+#define DEBUG 1
 
 class AliITSUReconstructor;
 class AliITSURecoDet;
