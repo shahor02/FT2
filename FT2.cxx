@@ -639,6 +639,15 @@ Bool_t FT2::ReconstructProbe()
     if (!PropagateToR(fITS->GetRITSTPCRef(),-1,kTRUE, kFALSE, kTRUE)) return kFALSE;
   }
   //
+  // 
+#if DEBUG
+  printf("Outward kalman results:\n");
+  for (int ilr=0;ilr<fITS->GetNLayersActive();ilr++) {
+    if (GetKalmanOut(ilr).GetSigmaY2()<=0) continue;
+    printf("Extrap to Lr %d : ",ilr); GetKalmanOut(ilr).Print();
+  }
+#endif
+  //
   // ITS tracking
   for (int ilr=fITS->GetNLayersActive();ilr--;) {
     fCurrITSLr = ilr;
@@ -687,45 +696,55 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
   // do we want to simulate fakes?
   if (fake && fdNdY>0) {
     double err2a,err2b;   
-    double trCov[3];
-    double* covInw = (double*)trc->GetCovariance();
+    double trCov[3],trPos[2];
     if (fCurrITSLr>=0 && fKalmanOutward[fCurrITSLr].GetSigmaY2()>0) { // weight with outward calman track
-      double* covOut = (double*)fKalmanOutward[fCurrITSLr].GetCovariance();
-      double detInw = covInw[0]*covInw[2]-covInw[1]*covInw[1];
-      double detOut = covOut[0]*covOut[2]-covOut[1]*covOut[1];
-      if (detInw<1e-16 || detOut<1e-16) {
+      AliExternalTrackParam trJoint = fKalmanOutward[fCurrITSLr];
+      if (TMath::Abs(trJoint.GetAlpha()-trc->GetAlpha())>1e-6 && !trJoint.Rotate(trc->GetAlpha())) {
 #if DEBUG
-	AliInfoF("Failed Update for fakes: detInw: %e detOutw: %e",detInw,detOut);
-	printf("Inward:  ");trc->Print();
-	printf("Outward: ");fKalmanOutward[fCurrITSLr].Print();	
-#endif
+	AliInfoF("Failed to rotate outward Kalman track to alpha=%f",trc->GetAlpha());
+	trJoint.Print();
 	return -1;
+#endif	
       }
-      detInw = 1./detInw;
-      detOut = 1./detOut;
-      double si00 = covInw[2]*detInw+covOut[2]*detOut;
-      double si11 = covInw[0]*detInw+covOut[0]*detOut;
-      double si01 =-covInw[1]*detInw-covOut[1]*detOut;
-      double det = si00*si11-si01*si01;
-      if (det<1e-1) {
+      if (TMath::Abs(trJoint.GetX()-trc->GetX())>1e-4 && !trJoint.PropagateTo(trc->GetX(),fBz)) {
 #if DEBUG
-	AliInfoF("Failed Update for fakes: detFinal: %e",det);
-	printf("Inward:  ");trc->Print();
-	printf("Outward: ");fKalmanOutward[fCurrITSLr].Print();	
-#endif
+	AliInfoF("Failed to propagate outward Kalman track to X=%f",trc->GetX());
+	trJoint.Print();
 	return -1;
+#endif		
       }
-      trCov[0] = si11/det;
-      trCov[2] = si00/det;
-      trCov[1] = -si01/det;
+      double inwPos[2] = {trc->GetY(),trc->GetZ()};
+      double inwCov[3] = {trc->GetSigmaY2(),trc->GetSigmaZY(),trc->GetSigmaZ2()};
+      if (!trJoint.Update(inwPos,inwCov)) {
+#if DEBUG
+	AliInfo("Failed to update outward Kalman track by inward one");
+	trJoint.Print();
+	trc->Print();
+	return -1;
+#endif
+      }
 #if DEBUG//>5
       printf("Errors on Lr %d: \n",fCurrITSLr);
-      printf("Inward  :  %+e %+e %+e\n",covInw[0],covInw[1],covInw[2]);
-      printf("Outward :  %+e %+e %+e\n",covOut[0],covOut[1],covOut[2]);
-      printf("Weighted:  %+e %+e %+e\n",trCov[0],trCov[1],trCov[2]);
+      printf("Inward  :  {%+e,%+e,%+e} {%+e,%+e}\n",trc->GetSigmaY2(),trc->GetSigmaZY(),trc->GetSigmaZ2(), trc->GetY(),trc->GetZ());
+      printf("Outward :  {%+e,%+e,%+e} {%+e,%+e}\n",fKalmanOutward[fCurrITSLr].GetSigmaY2(),
+	     fKalmanOutward[fCurrITSLr].GetSigmaZY(),fKalmanOutward[fCurrITSLr].GetSigmaZ2(),
+	     fKalmanOutward[fCurrITSLr].GetY(),fKalmanOutward[fCurrITSLr].GetZ());
+      printf("Weighted:  {%+e,%+e,%+e} {%+e,%+e}\n",trJoint.GetSigmaY2(),trJoint.GetSigmaZY(),trJoint.GetSigmaZ2(),
+	     trJoint.GetY(),trJoint.GetZ());
 #endif
+      trPos[0] = trJoint.GetY();
+      trPos[1] = trJoint.GetZ();
+      trCov[0] = trJoint.GetSigmaY2();
+      trCov[1] = trJoint.GetSigmaZY();      
+      trCov[2] = trJoint.GetSigmaZ2();
     }
-    else for (int i=3;i--;) trCov[i] = covInw[i];
+    else {
+      trPos[0] = trc->GetY();
+      trPos[1] = trc->GetZ();
+      trCov[0] = trc->GetSigmaY2();
+      trCov[1] = trc->GetSigmaZY();
+      trCov[2] = trc->GetSigmaZ2();
+    }
     //
     if (!DiagonalizeErrors(trCov,err2a,err2b)) {
 #if DEBUG
@@ -746,7 +765,7 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
     printf("DiagErr: %e %e Rho:%e PFake: %e\n",err2a,err2b, rho, probFake);
 #endif
     if (gRandom->Rndm()<probFake) { // need to fake the hit
-      BiasAsFake(meas, trc->GetParameter(), trCov);
+      BiasAsFake(meas, trPos, trCov);
       if (fCurrITSLr>=0) {
 	fITSPatternFake |= 0x1<<fCurrITSLr;
 	fNClITSFakes++;
@@ -759,11 +778,14 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
   }
   //
   double chi2 = trc->GetPredictedChi2(meas,measErr2);
+#if DEBUG>5
   if (fake) {
     printf("Updating {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d -> %f\n", meas[0],meas[1],y,z,
 	   measErr2[0],measErr2[1],measErr2[2],fNClITS,fNClITSFakes,chi2); 
     trc->Print();
   }
+#endif
+  //
   if (!trc->Update(meas,measErr2)) {
 #if DEBUG
     printf("Failed to Update {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d\n", meas[0],meas[1],y,z,
@@ -1212,7 +1234,9 @@ Bool_t FT2::BiasAsFake(double yz[2], const double* extyz, const double *cov) con
     d2 = dy*dy*r00+dz*dz*r11+2.*dy*dz*r01;
   }
   //
+#if DEBUG>1
   printf("AddFake DY:%f DZ:%f Chi2Max:%f Chi2F:%f\n",dy,dz, d2max,d2);
+#endif
   yz[0] = extyz[0]+dy;
   yz[1] = extyz[1]+dz;
   return kTRUE;

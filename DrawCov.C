@@ -1,48 +1,39 @@
 #include <TMath.h>
-#include <TPolyLine.h>
-#include <TVector2.h>
+#include <RooEllipse.h>
 #include <TH2F.h>
+#include <TPad.h>
+#include <TMarker.h>
 
-TH2* hh;
-TPolyLine* pl;
+TH2* hh=0;
+RooEllipse* elp=0;
+TMarker* pl=0;
 
-Bool_t DiagonalizeErrors(const double* cov, double &sy2d, double &sz2d);
-
-void DrawCov(double sig00, double sig01,double sig11)
+void DrawCov(double *posCov, double *errCov, double* posHit=0,Bool_t elpOnly=kFALSE)
 {
-  double cov[3] = {sig00,sig01,sig11};
-  double sA2,sB2;
-  if (!DiagonalizeErrors(cov,sA2,sB2)) return;
-  sA2 = TMath::Sqrt(sA2);
-  sB2 = TMath::Sqrt(sB2);
-  double tht = 0.5*TMath::ATan2(2*sig01,(sig00-sig11));
-  printf("Axes: %f %f, tht: %f\n",sA2,sB2,tht);
-  TVector2 vs;
-  int np=100;
-  double dph = TMath::TwoPi()/np;
-  pl = new TPolyLine(np);
-  //  
-  double axX = TMath::Sqrt(sig00);
-  double axY = TMath::Sqrt(sig11);
-  hh = new TH2F("err","",20,-2*axX,2*axX, 20,-2*axY,2*axY);
-  hh->Draw();
-  for (int i=0;i<np;i++) {
-    vs.Set(sA2*TMath::Cos(dph*i), sB2*TMath::Sin(dph*i));
-    vs = vs.Rotate(tht);
-    pl->SetPoint(i,vs.X(),vs.Y());
+  double axX = TMath::Sqrt(errCov[0]);
+  double axY = TMath::Sqrt(errCov[2]);
+  double corr = errCov[1]/(axX*axY);
+  //
+  double xmn=posCov[0]-2*axX;
+  double xmx=posCov[0]+2*axX;
+  double ymn=posCov[1]-2*axY;
+  double ymx=posCov[1]+2*axY;
+  if (posHit) {
+    if (xmn>posHit[0]) xmn = posHit[0]-0.1*(xmx-posHit[0]);
+    else if (xmx<posHit[0]) xmx = posHit[0]+0.1*(posHit[0]-xmn);
+    if (ymn>posHit[1]) ymn = posHit[1]-0.1*(ymx-posHit[1]);
+    else if (ymx<posHit[1]) ymx = posHit[1]+0.1*(posHit[1]-ymn);
   }
-  pl->Draw();
-}
-
-//__________________________________________________________
-Bool_t DiagonalizeErrors(const double* cov, double &sy2d, double &sz2d) 
-{
-  // diagonalize cov. matrix
-  double dd = cov[0]-cov[2]; 
-  dd = TMath::Sqrt(dd*dd + 4.*cov[1]*cov[1]);
-  double sd = cov[0]+cov[2];
-  sy2d = 0.5*(sd - dd);
-  sz2d = 0.5*(sd + dd);
-  if (sy2d<=0 || sz2d<=0) return kFALSE;
-  return kTRUE;
+  if (!elpOnly) {
+    hh = new TH2F("err","",20,xmn,xmx,20,ymn,ymx);
+    hh->Draw();
+  }
+  elp = new RooEllipse("elp",posCov[0],posCov[1],axX,axY,corr);
+  elp->Draw();
+  gPad->SetGrid(1,1);
+  //
+  if (posHit) {
+    pl = new TMarker(posHit[0],posHit[1],20);
+    pl->Draw();
+  }
 }
