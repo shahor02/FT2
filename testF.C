@@ -56,7 +56,7 @@ void testF(int ntrials=10000, double dndy=2100., Bool_t useKalmanOut=kTRUE)
   vtx->Print();
   //
   TParticle prt;
-  double p = 0.25;
+  double pt = 0.45;
   for (int ntr=0;ntr<ntrials;ntr++) {
     
     vtx->SetXv(gRandom->Gaus(-0.1, 50e-4));
@@ -66,8 +66,9 @@ void testF(int ntrials=10000, double dndy=2100., Bool_t useKalmanOut=kTRUE)
     double phi = gRandom->Rndm()*TMath::TwoPi();
     double eta =  2*(gRandom->Rndm()-0.5)*0.8;
     double theta = 2*TMath::ATan(TMath::Exp(-eta));
+    double p = pt/TMath::Sin(theta);
     double pz = p*TMath::Cos(theta);
-    double pt = p*TMath::Sin(theta);
+    //    double pt = p*TMath::Sin(theta);
     double pxyz[3]={pt*TMath::Cos(phi),pt*TMath::Sin(phi),pz};
     double en = TMath::Sqrt(p*p+0.14*0.14);
     prt.SetPdgCode(gRandom->Rndm()>0.5 ? 211 : -211);

@@ -1,17 +1,18 @@
 #ifndef FT2_H
 #define FT2_H
 #include <TObject.h>
+#include <TBits.h>
 #include "AliExternalTrackParam.h"
 #include "AliITSUAux.h"
 #include "AliESDpid.h"
 #include "AliPIDResponse.h"
+#include "AliITSURecoLayer.h"
 
 //#define DEBUG 11
 //#define DEBUG 1
 
 class AliITSUReconstructor;
 class AliITSURecoDet;
-class AliITSURecoLayer;
 class AliITSURecoSens;
 class TParticle;
 class AliVertex;
@@ -46,9 +47,10 @@ class FT2 : public TObject
  public:
   enum {kMaxITSLr=7, kMaxHitPerLr=2};
   struct FT2TPCLayer {
-  FT2TPCLayer(float xr=0,float x2x=0,float resRPhi=0,float resZ=0,float effL=0) :
-    x(xr),x2x0(x2x),rphiRes(resRPhi),zRes(resZ),eff(effL),isDead(resRPhi>kRidiculous||resZ>kRidiculous),
+  FT2TPCLayer(int id=-1,float xr=0,float x2x=0,float resRPhi=0,float resZ=0,float effL=0) :
+    rowId(id),x(xr),x2x0(x2x),rphiRes(resRPhi),zRes(resZ),eff(effL),isDead(resRPhi>kRidiculous||resZ>kRidiculous),
       hitY(0),hitZ(0),hitSect(-1) {if (isDead) effL=-1;}
+    Int_t    rowId;
     Float_t  x;
     Float_t  x2x0;
     Float_t  rphiRes;
@@ -85,6 +87,7 @@ class FT2 : public TObject
   Int_t    GetNClTPC()  const {return fNClTPC;}
   Double_t GetChi2ITS() const {return fChi2ITS;}
   Double_t GetChi2TPC() const {return fChi2TPC;}
+  const TBits&   GetTPCHitMap() const {return fTPCMap;}
   FTProbe& GetProbe() const {return (FTProbe&)fProbe;}
   AliExternalTrackParam& GetKalmanOut(int i) {return (AliExternalTrackParam&)fKalmanOutward[i];}
   void   SetUseKalmanOut(Bool_t v=kTRUE)  {fUseKalmanOut = v;}
@@ -105,7 +108,7 @@ class FT2 : public TObject
   //
  protected:
   void AddTPC(Float_t sigY=0.1, Float_t sigZ=0.1, Float_t eff=0.99, Float_t scEdge=2.6);
-  void AddTPCLayer(Float_t x, Float_t x2x0,Float_t sigY, Float_t sigZ, Float_t eff);
+  void AddTPCLayer(Int_t rowID, Float_t x, Float_t x2x0,Float_t sigY, Float_t sigZ, Float_t eff);
   Bool_t InitProbe(TParticle* trc);
   Bool_t PrepareProbe();
   Bool_t ApplyMSEloss(double x2X0, double xrho);
@@ -113,9 +116,10 @@ class FT2 : public TObject
   Bool_t PropagateToR(double xTgt, int dir,Bool_t propErr,Bool_t simMat,Bool_t useTGeo);
   Bool_t IsZero(double val, double tol=1e-9) const {return TMath::Abs(val)<tol;}
   Bool_t PassActiveITSLayer(AliITSURecoLayer* lr);
-  Bool_t GetRoadWidth(AliITSURecoLayer* lrA,double *pr);
+  Bool_t GetRoadWidth(AliITSURecoLayer* lrA,double *pr,Int_t nstd = 3);
   void   ResetCovMat(AliExternalTrackParam* trc);
   Double_t UpdateKalman(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,Bool_t randomize=kTRUE,Bool_t fake=kFALSE);
+  Double_t UpdateKalmanTPC(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,Bool_t randomize=kTRUE);
   Bool_t ReconstructProbe();
   AliPIDResponse::EDetPidStatus GetComputeTPCProbability (const AliVTrack *track, Int_t nSpecies, Double_t p[]) const;
   //
@@ -154,12 +158,16 @@ class FT2 : public TObject
   Int_t                 fITSPattern;     //! pattern for ITS clusters
   Double_t              fChi2TPC;   //! total chi2 in TPC
   Double_t              fChi2ITS;   //! total chi2 in ITS
+  TBits                 fTPCMap;    //! tpc hit map
+  
   //
   // hit info in the ITS
   Double_t fSigYITS,fSigZITS;       // nominal ITS later resolution
   Int_t fNITSHits[kMaxITSLr]; //! n hits per ITS layer
+  Int_t fNITSSensCand[kMaxITSLr]; //! n sensor candidates per ITS layer
   Int_t fNITSLrHit;           //! n of ITS layers whith hit
   AliITSURecoSens* fITSSensHit[kMaxITSLr][2]; //! hit sensors
+  AliITSURecoSens* fITSSensCand[kMaxITSLr][AliITSURecoLayer::kMaxSensMatching]; //! hit sensor candidates
   Double_t fITSHitYZ[kMaxITSLr][kMaxHitPerLr][2]; //! tracking Y,Z of each hit
   //
   Double_t fdNdY;             //! if positive, use it for fakes simulation

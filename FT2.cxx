@@ -1,3 +1,4 @@
+// in the loop of ITS update: organize search
 #include "FT2.h"
 #include "AliCDBManager.h"
 #include "AliCDBEntry.h"
@@ -18,11 +19,13 @@
 #include <TParticle.h>
 #include <TDatabasePDG.h>
 #include <TRandom.h>
-#include <../TPC/Base/AliTPCcalibDB.h>
-#include <../TPC/Base/AliTPCParam.h>
+#include "AliTPCcalibDB.h"
+#include "AliTPCParam.h"
 #include "AliPIDResponse.h"
 #include "AliDetectorPID.h"
+#include "TH2F.h"
 
+TH2F* hfake = 0;
 
 using namespace AliITSUAux;
 
@@ -64,6 +67,7 @@ fITSRec(0)
   ,fITSPattern(0)
   ,fChi2TPC(0)
   ,fChi2ITS(0)
+  ,fTPCMap()
   ,fSigYITS(3.14e-4) // 5e-4
   ,fSigZITS(3.38e-4) // 5e-4
   ,fNITSLrHit(0)
@@ -226,17 +230,17 @@ void FT2::AddTPC(Float_t sigY, Float_t sigZ, Float_t eff,Float_t scEdge)
       rowRadius =  kTPCRow64Radius + (k-kTPCInnerRows+1)*kTPCMiddleRadialPitch ;
     else if (k>=(kTPCInnerRows+kTPCMiddleRows) && k<kTPCRows )
       rowRadius = kTPCRow128Radius + (k-kTPCInnerRows-kTPCMiddleRows+1)*kTPCOuterRadialPitch ;
-    AddTPCLayer(rowRadius,kRadLPerRow,sigY,sigZ,eff);
+    AddTPCLayer(k,rowRadius,kRadLPerRow,sigY,sigZ,eff);
   }
   //
   fTPCHitLr.resize(fTPCLayers.size());
 }
 
 //____________________________________________________
-void FT2::AddTPCLayer(Float_t x, Float_t x2x0,Float_t sigY, Float_t sigZ, Float_t eff)
+void FT2::AddTPCLayer(Int_t rowId,Float_t x, Float_t x2x0,Float_t sigY, Float_t sigZ, Float_t eff)
 {
   // add single TPC layer
-  fTPCLayers.push_back(FT2TPCLayer(x,x2x0,sigY,sigZ,eff));
+  fTPCLayers.push_back(FT2TPCLayer(rowId,x,x2x0,sigY,sigZ,eff));
 }
 
 //____________________________________________________
@@ -396,6 +400,7 @@ Bool_t FT2::InitProbe(TParticle* part)
   // Set AliExternalTrackParam
   fProbe.Set(xref, alpha, param, covar);
   ResetCovMat(&fProbe);
+  fTPCMap.ResetAllBits();
   return kTRUE;
 }
 
@@ -630,7 +635,7 @@ Bool_t FT2::ReconstructProbe()
       if (tpcLr.x2x0>0 && !fProbe.CorrectForMeanMaterial(tpcLr.x2x0,0,fProbe.fProbeMass) ) return kFALSE;
       //
       if (tpcLr.isDead) continue;
-      double chi = UpdateKalman(&fProbe,tpcLr.hitY,tpcLr.hitZ,tpcLr.rphiRes,tpcLr.zRes,kTRUE,kFALSE);
+      double chi = UpdateKalmanTPC(&fProbe,tpcLr.hitY,tpcLr.hitZ,tpcLr.rphiRes,tpcLr.zRes,kTRUE);
       if (chi<0) return kFALSE;
       fChi2TPC += chi;
       fNClTPC++;
@@ -651,13 +656,25 @@ Bool_t FT2::ReconstructProbe()
   // ITS tracking
   for (int ilr=fITS->GetNLayersActive();ilr--;) {
     fCurrITSLr = ilr;
+    AliITSURecoLayer* lrA = fITS->GetLayerActive(ilr);
 #if DEBUG>5
     AliInfoF("Entering ITS cluster loop on lr%d: %d clusters",ilr,fNITSHits[ilr]);
 #endif
-    if (!fNITSHits[ilr]) continue;
-    // for 2 hits (overlap) chose only 1
-    int iht = fNITSHits[ilr]==1 ? 0 : (gRandom->Rndm()>0.5 ? 0:1);
-    AliITSURecoSens* sens = fITSSensHit[ilr][iht];
+    AliITSURecoSens* sens = 0;
+    int iht = 0;
+    if (fNITSHits[ilr]) { 
+      // for 2 hits (overlap) chose only 1
+      iht = fNITSHits[ilr]==1 ? 0 : (gRandom->Rndm()>0.5 ? 0:1);
+      sens = fITSSensHit[ilr][iht];
+    }
+    else { // there was no hit but fake may be picked
+      Double_t trImpData[AliITSUTrackerGlo::kNTrImpData];
+      if (!GetRoadWidth(lrA, trImpData)) return kFALSE;
+      AliITSURecoSens **hitSens = &fITSSensCand[ilr][0];
+      int nsens = lrA->FindSensors(&trImpData[AliITSUTrackerGlo::kTrPhi0], hitSens);
+      if (nsens) sens = hitSens[0];
+      else continue; // no candidate // hereRS
+    }
     if (!fProbe.Rotate(sens->GetPhiTF())) {
 #if DEBUG
       printf("Failed to rotate to sensor phi %f at lr %d\n",sens->GetPhiTF(),ilr); 
@@ -666,15 +683,16 @@ Bool_t FT2::ReconstructProbe()
 #endif
     }
     if (!PropagateToX(sens->GetXTF(),-1,kTRUE, kFALSE, kTRUE)) return kFALSE; // account for materials
-    double chi = UpdateKalman(&fProbe,fITSHitYZ[ilr][iht][0],fITSHitYZ[ilr][iht][1],fSigYITS,fSigZITS,kTRUE,kTRUE);
- #if DEBUG>5
+    double chi = UpdateKalman(&fProbe,fITSHitYZ[ilr][iht][0],fITSHitYZ[ilr][iht][1],fSigYITS,fSigZITS,kTRUE,ilr<1/*kTRUE*/);
+    //double chi = UpdateKalman(&fProbe,fITSHitYZ[ilr][iht][0],fITSHitYZ[ilr][iht][1],fSigYITS,fSigZITS,kTRUE,kTRUE);
+#if DEBUG>5
     AliInfoF("Updated at ITS Lr%d, chi2:%f NclITS:%d Fakes: %d",ilr,chi,fNClITS,fNClITSFakes);
 #endif   
     if (chi<0) return kFALSE;
     fChi2ITS += chi;
     fNClITS++;
     fITSPattern |= 0x1<<ilr;
-  }
+  } // true hit is present
   //
   return kTRUE;
 }
@@ -697,7 +715,7 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
   if (fake && fdNdY>0) {
     double err2a,err2b;   
     double trCov[3],trPos[2];
-    if (fCurrITSLr>=0 && fKalmanOutward[fCurrITSLr].GetSigmaY2()>0) { // weight with outward calman track
+    if (fCurrITSLr>=0 && fKalmanOutward[fCurrITSLr].GetSigmaY2()>0) { // weight with outward kalman track
       AliExternalTrackParam trJoint = fKalmanOutward[fCurrITSLr];
       if (TMath::Abs(trJoint.GetAlpha()-trc->GetAlpha())>1e-6 && !trJoint.Rotate(trc->GetAlpha())) {
 #if DEBUG
@@ -723,7 +741,7 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
 	return -1;
 #endif
       }
-#if DEBUG//>5
+      //#if DEBUG//>5
       printf("Errors on Lr %d: \n",fCurrITSLr);
       printf("Inward  :  {%+e,%+e,%+e} {%+e,%+e}\n",trc->GetSigmaY2(),trc->GetSigmaZY(),trc->GetSigmaZ2(), trc->GetY(),trc->GetZ());
       printf("Outward :  {%+e,%+e,%+e} {%+e,%+e}\n",fKalmanOutward[fCurrITSLr].GetSigmaY2(),
@@ -731,7 +749,7 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
 	     fKalmanOutward[fCurrITSLr].GetY(),fKalmanOutward[fCurrITSLr].GetZ());
       printf("Weighted:  {%+e,%+e,%+e} {%+e,%+e}\n",trJoint.GetSigmaY2(),trJoint.GetSigmaZY(),trJoint.GetSigmaZ2(),
 	     trJoint.GetY(),trJoint.GetZ());
-#endif
+      //#endif
       trPos[0] = trJoint.GetY();
       trPos[1] = trJoint.GetZ();
       trCov[0] = trJoint.GetSigmaY2();
@@ -756,15 +774,29 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
     trc->GetXYZ(xyz);
     double rho = HitDensity(xyz[0]*xyz[0]+xyz[1]*xyz[1],trc->GetTgl());
     //
-    // prob. of good hit (http://rnc.lbl.gov/~wieman/HitFinding2D.htm)
+    /*
+    // prob. of good hit (http://rnc.lbl.gov/~wieman/HitFinding2D.htm for closest hit)
     Double_t sx2, sy2, probFake;
     sx2 = 2 * TMath::Pi()*err2a*rho;
     sy2 = 2 * TMath::Pi()*err2b*rho;
     probFake = 1.-TMath::Sqrt(1./((1+sx2)*(1+sy2)));
-#if DEBUG
-    printf("DiagErr: %e %e Rho:%e PFake: %e\n",err2a,err2b, rho, probFake);
-#endif
-    if (gRandom->Rndm()<probFake) { // need to fake the hit
+    */
+    
+    // prob. of good hit (http://rnc.lbl.gov/~wieman/HitFinding2DXsq.htm for hit with best chi2)
+    Double_t probFake;
+    probFake = 1.-1./(1.+TMath::Pi()*2*TMath::Sqrt(err2a*err2b)*rho);
+    //    
+    Bool_t prevFake = kFALSE;  // if prev updated layer produced fake, this one also will likely be a fake
+    for (int j=fCurrITSLr+1;j<fITS->GetNLayersActive();j++) {
+      if (!(fITSPattern & (0x1<<j))) continue;
+      if (fITSPatternFake & (0x1<<j)) prevFake = kTRUE;
+      break;
+    }
+    //#if DEBUG
+    printf("DiagErr@%d: %e %e Rho:%e PFake: %e PrevFake: %d\n",fCurrITSLr,err2a,err2b, rho, probFake, prevFake);
+    trc->Print();
+    //#endif
+    if (1 || prevFake || gRandom->Rndm()<probFake) { // need to fake the hit
       BiasAsFake(meas, trPos, trCov);
       if (fCurrITSLr>=0) {
 	fITSPatternFake |= 0x1<<fCurrITSLr;
@@ -786,6 +818,31 @@ Double_t FT2::UpdateKalman(AliExternalTrackParam* trc, double y,double z,double 
   }
 #endif
   //
+  if (!trc->Update(meas,measErr2)) {
+#if DEBUG
+    printf("Failed to Update {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d\n", meas[0],meas[1],y,z,
+	   measErr2[0],measErr2[1],measErr2[2],fNClITS,fNClITSFakes); 
+    trc->Print();
+#endif
+     return -1;
+  }
+  return chi2;
+}
+
+//________________________________________________________________________
+Double_t FT2::UpdateKalmanTPC(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,Bool_t randomize)
+{
+  // calman update, return chi2 increment or -1 on failure
+  //
+  if (randomize) {
+    double ry,rz;
+    gRandom->Rannor(ry,rz);
+    y += sigY*ry;
+    z += sigZ*rz;
+  }
+  double meas[2] = {y,z};
+  double measErr2[3] = {sigY*sigY,0,sigZ*sigZ};
+  double chi2 = trc->GetPredictedChi2(meas,measErr2);
   if (!trc->Update(meas,measErr2)) {
 #if DEBUG
     printf("Failed to Update {%e %e}/{%e %e} {%e %e %e} Ncl:%d NclF:%d\n", meas[0],meas[1],y,z,
@@ -997,7 +1054,7 @@ Bool_t FT2::ApplyMSEloss(double x2X0, double xrho)
 }
 
 //__________________________________________________________________
-Bool_t FT2::GetRoadWidth(AliITSURecoLayer* lrA,double *pr)
+Bool_t FT2::GetRoadWidth(AliITSURecoLayer* lrA,double *pr, Int_t nstd)
 {
   static AliExternalTrackParam sc;   // seed copy for manipulations
 #if DEBUG>5
@@ -1005,11 +1062,13 @@ Bool_t FT2::GetRoadWidth(AliITSURecoLayer* lrA,double *pr)
 #endif
   sc = fProbe;
   double xt;
-  if (!sc.GetXatLabR(lrA->GetRMin(),xt,fBz,1)) return kFALSE;
-  if (!sc.PropagateParamOnlyTo(xt,fBz)) return kFALSE;
+  if (!sc.GetXatLabR(lrA->GetRMax(),xt,fBz,1)) return kFALSE;
+  Bool_t res = nstd>0 ? sc.PropagateTo(xt,fBz) : sc.PropagateParamOnlyTo(xt,fBz);
+  if (!res) return kFALSE;
   sc.GetXYZ(&pr[AliITSUTrackerGlo::kTrXIn]);
   pr[AliITSUTrackerGlo::kTrPhiIn] = TMath::ATan2(pr[AliITSUTrackerGlo::kTrYIn],pr[AliITSUTrackerGlo::kTrXIn]);
-  if (!sc.RotateParamOnly(pr[AliITSUTrackerGlo::kTrPhiIn])) return kFALSE; // go to the frame of the entry point into the layer
+  res = nstd>0 ? sc.Rotate(pr[AliITSUTrackerGlo::kTrPhiIn]) : sc.RotateParamOnly(pr[AliITSUTrackerGlo::kTrPhiIn]);
+  if (!res) return kFALSE; // go to the frame of the entry point into the layer
   BringTo02Pi(pr[AliITSUTrackerGlo::kTrPhiIn]);
   double dr  = lrA->GetDR();                              // approximate X dist at the inner radius
   if (!sc.GetXYZAt(sc.GetX()-dr, fBz, pr + AliITSUTrackerGlo::kTrXOut)) {
@@ -1025,6 +1084,10 @@ Bool_t FT2::GetRoadWidth(AliITSURecoLayer* lrA,double *pr)
   BringTo02Pi(pr[AliITSUTrackerGlo::kTrPhiOut]);
   double sgy = 1e-6; // dummy spread
   double sgz = 1e-6; // dummy spread
+  if (nstd>0) {
+    sgy = nstd*TMath::Sqrt(sc.GetSigmaY2());
+    sgz = nstd*TMath::Sqrt(sc.GetSigmaZ2());    
+  }
   double phi0  = MeanPhiSmall(pr[AliITSUTrackerGlo::kTrPhiOut],pr[AliITSUTrackerGlo::kTrPhiIn]);
   double dphi0 = DeltaPhiSmall(pr[AliITSUTrackerGlo::kTrPhiOut],pr[AliITSUTrackerGlo::kTrPhiIn]);
   //
@@ -1046,17 +1109,21 @@ Bool_t FT2::GetRoadWidth(AliITSURecoLayer* lrA,double *pr)
 Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
 {
   // pass the layer and register the hits
+  static AliExternalTrackParam prbBackup;
   Double_t trImpData[AliITSUTrackerGlo::kNTrImpData];
-  AliITSURecoSens *hitSens[AliITSURecoLayer::kMaxSensMatching];
   AliITSUGeomTGeo* gm = fITS->GetGeom();
   //
   int lrAID = lr->GetActiveID();
+  AliITSURecoSens **hitSens = &fITSSensCand[lrAID][0];
+  //
   ((double*)fKalmanOutward[lrAID].GetCovariance())[0] = -1; // invalidate outward track
   //
-  if (!GetRoadWidth(lr, trImpData)) return kFALSE;
+  if (!GetRoadWidth(lr, trImpData, -1)) return kFALSE;
   fNITSHits[lrAID] = 0;
+  fNITSSensCand[lrAID] = 0;
+  //
   const AliITSsegmentation* segm = gm->GetSegmentation(lrAID);
-  int nsens = lr->FindSensors(&trImpData[AliITSUTrackerGlo::kTrPhi0], hitSens);
+  int nsens = fNITSSensCand[lrAID] = lr->FindSensors(&trImpData[AliITSUTrackerGlo::kTrPhi0], hitSens);
   int idxHit[2] = {0,1};
   //
 #if DEBUG>5
@@ -1092,6 +1159,8 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
     nsens=2;
   }
   //
+  ((double*)prbBackup.GetCovariance())[0] = -1; // invalidate backup track
+  //
   for (int isn=0;isn<nsens;isn++) {
     AliITSURecoSens* sens =  hitSens[idxHit[isn]];
     Bool_t res = fUseKalmanOut ? fProbe.Rotate(sens->GetPhiTF()) : fProbe.RotateParamOnly(sens->GetPhiTF());
@@ -1119,6 +1188,7 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
       sens->Print();
       segm->Print();
 #endif
+      prbBackup = fProbe;
       continue; // not in the active zone
     }
     // register hit
@@ -1126,8 +1196,8 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
     fITSSensHit[lrAID][nh] = sens;
     fITSHitYZ[lrAID][nh][0] = fProbe.GetY();
     fITSHitYZ[lrAID][nh][1] = fProbe.GetZ();
+    if (!fNITSHits[lrAID]) fNITSLrHit++;
     fNITSHits[lrAID]++;
-    if (fNITSHits[lrAID]) fNITSLrHit++;
 #if DEBUG>5
     printf("Register hit %d at lr%d\n",fNITSHits[lrAID],lr->GetActiveID());
     fProbe.Print();
@@ -1148,6 +1218,17 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
 	// assign updated error matrix to fProbe
 	memcpy((double*)fProbe.GetCovariance(),trKOUp.GetCovariance(),15*sizeof(double));
       } // update for outward Kalman
+    }
+  }
+  //
+  // check if the "forward Kalman was registered
+  if (fKalmanOutward[lrAID].GetSigmaY2()<0) { // no hit was registered
+    if (prbBackup.GetSigmaY2()>0) { // but the probe at least was propagated to some sensor
+      fKalmanOutward[lrAID] = prbBackup;
+    }
+    else {
+      if (!PropagateToR(lr->GetRMax(),1,kFALSE,fSimMat,fSimMat)) return kFALSE; // go to nominal radius
+      fKalmanOutward[lrAID] = fProbe;
     }
   }
   //
@@ -1226,17 +1307,19 @@ Bool_t FT2::BiasAsFake(double yz[2], const double* extyz, const double *cov) con
   dy0 = TMath::Sqrt(d2max*cov[0]);
   dz0 = TMath::Sqrt(d2max*cov[2]);
   double d2 = 1e9;
-  //  printf("d2max: %f dy:%f dz:%f\n",d2max,dy0,dz0);
+  printf("d2max: %f dy:%f dz:%f | Cov: %e %e %e\n",d2max,dy0,dz0, cov[0],cov[1],cov[2]);
   double dy(dy0),dz(dz0);
   while(d2>=d2max) {
     dy = (gRandom->Rndm()-0.5)*2*dy0;
     dz = (gRandom->Rndm()-0.5)*2*dz0;
     d2 = dy*dy*r00+dz*dz*r11+2.*dy*dz*r01;
   }
+  if (!hfake) hfake = new TH2F("hfake","hf",100,1,-1,100,1,-1);
+  hfake->Fill(dy,dz);
   //
-#if DEBUG>1
+  //#if DEBUG>1
   printf("AddFake DY:%f DZ:%f Chi2Max:%f Chi2F:%f\n",dy,dz, d2max,d2);
-#endif
+  //#endif
   yz[0] = extyz[0]+dy;
   yz[1] = extyz[1]+dz;
   return kTRUE;
