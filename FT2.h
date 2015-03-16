@@ -118,8 +118,11 @@ class FT2 : public TObject
   Bool_t PassActiveITSLayer(AliITSURecoLayer* lr);
   Bool_t GetRoadWidth(AliITSURecoLayer* lrA,double *pr,Int_t nstd = 3);
   void   ResetCovMat(AliExternalTrackParam* trc);
-  Double_t UpdateKalman(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,Bool_t randomize=kTRUE,Bool_t fake=kFALSE);
-  Double_t UpdateKalmanTPC(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,Bool_t randomize=kTRUE);
+  Double_t UpdateKalman(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,
+			Bool_t randomize=kTRUE,double scly=1.,double sclz=1.);
+  Bool_t GetSmoothedEstimate(int ilr,const AliExternalTrackParam* trcInw, double* trPos,double* trCov);
+  Int_t  ReconstructOnITSLayer(int ilr, double chi2Cut=36.);
+
   Bool_t ReconstructProbe();
   AliPIDResponse::EDetPidStatus GetComputeTPCProbability (const AliVTrack *track, Int_t nSpecies, Double_t p[]) const;
   //
@@ -159,10 +162,10 @@ class FT2 : public TObject
   Double_t              fChi2TPC;   //! total chi2 in TPC
   Double_t              fChi2ITS;   //! total chi2 in ITS
   TBits                 fTPCMap;    //! tpc hit map
-  
-  //
+  //  
   // hit info in the ITS
-  Double_t fSigYITS,fSigZITS;       // nominal ITS later resolution
+  Double_t fSigYITS,fSigZITS;       // nominal ITS layer resolution
+  Double_t fITSerrSclY,fITSerrSclZ; // scaling factor for assigned errors
   Int_t fNITSHits[kMaxITSLr]; //! n hits per ITS layer
   Int_t fNITSSensCand[kMaxITSLr]; //! n sensor candidates per ITS layer
   Int_t fNITSLrHit;           //! n of ITS layers whith hit
