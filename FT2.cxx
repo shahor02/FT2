@@ -1150,7 +1150,7 @@ Bool_t FT2::BiasAsFake(double yz[2], const double* extyz, const double *cov) con
   dy0 = TMath::Sqrt(d2max*cov[0]);
   dz0 = TMath::Sqrt(d2max*cov[2]);
   double d2 = 1e9;
-  printf("d2max: %f dy:%f dz:%f | Cov: %e %e %e\n",d2max,dy0,dz0, cov[0],cov[1],cov[2]);
+  //  printf("d2max: %f dy:%f dz:%f\n",d2max,dy0,dz0);
   double dy(dy0),dz(dz0);
   while(d2>=d2max) {
     dy = (gRandom->Rndm()-0.5)*2*dy0;
@@ -1160,9 +1160,9 @@ Bool_t FT2::BiasAsFake(double yz[2], const double* extyz, const double *cov) con
   if (!hfake) hfake = new TH2F("hfake","hf",100,1,-1,100,1,-1);
   hfake->Fill(dy,dz);
   //
-  //#if DEBUG>1
+#if DEBUG>1
   printf("AddFake DY:%f DZ:%f Chi2Max:%f Chi2F:%f\n",dy,dz, d2max,d2);
-  //#endif
+#endif
   yz[0] = extyz[0]+dy;
   yz[1] = extyz[1]+dz;
   return kTRUE;
@@ -1231,7 +1231,9 @@ Int_t FT2::ReconstructOnITSLayer(int ilr, double chi2Cut)
   double dYsearch = 2*TMath::Max(0.00001,TMath::Sqrt((trCov[0]+yzcov[0])*chi2Cut));
   double dZsearch = 2*TMath::Max(0.00001,TMath::Sqrt((trCov[2]+yzcov[2])*chi2Cut));
   int nFakeCand = gRandom->Poisson(rho*dYsearch*dZsearch); // expected number of surrounding hits
+#if DEBUG>1
   printf("Lr:%d NF:%3d rho:%f S:%.3fx%.3f\n",ilr,nFakeCand,rho,dYsearch,dZsearch);
+#endif
   if (nFakeCand) {
     AliITSUGeomTGeo* gm = fITS->GetGeom();
     const AliITSsegmentation* segm = gm->GetSegmentation(ilr);
@@ -1306,7 +1308,7 @@ const AliExternalTrackParam* FT2::GetSmoothedEstimate(int ilr,const AliExternalT
       return 0;
 #endif
     }
-    //#if DEBUG//>5
+#if DEBUG//>5
     printf("Errors on Lr %d: \n",ilr);
     printf("Inward  :  {%+e,%+e,%+e} {%+e,%+e}\n",trcInw->GetSigmaY2(),trcInw->GetSigmaZY(),
 	   trcInw->GetSigmaZ2(), trcInw->GetY(),trcInw->GetZ());
@@ -1315,7 +1317,7 @@ const AliExternalTrackParam* FT2::GetSmoothedEstimate(int ilr,const AliExternalT
 	   fKalmanOutward[ilr].GetY(),fKalmanOutward[ilr].GetZ());
     printf("Weighted:  {%+e,%+e,%+e} {%+e,%+e}\n",trJoint.GetSigmaY2(),trJoint.GetSigmaZY(),trJoint.GetSigmaZ2(),
 	   trJoint.GetY(),trJoint.GetZ());
-    //#endif
+#endif
     trPos[0] = trJoint.GetY();
     trPos[1] = trJoint.GetZ();
     trCov[0] = trJoint.GetSigmaY2();
