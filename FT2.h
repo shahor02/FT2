@@ -120,8 +120,8 @@ class FT2 : public TObject
   void   ResetCovMat(AliExternalTrackParam* trc);
   Double_t UpdateKalman(AliExternalTrackParam* trc, double y,double z,double sigY,double sigZ,
 			Bool_t randomize=kTRUE,double scly=1.,double sclz=1.);
-  Bool_t GetSmoothedEstimate(int ilr,const AliExternalTrackParam* trcInw, double* trPos,double* trCov);
-  Int_t  ReconstructOnITSLayer(int ilr, double chi2Cut=36.);
+  const AliExternalTrackParam* GetSmoothedEstimate(int ilr,const AliExternalTrackParam* trcInw, double* trPos,double* trCov);
+  Int_t  ReconstructOnITSLayer(int ilr, double chi2Cut=70.);
 
   Bool_t ReconstructProbe();
   AliPIDResponse::EDetPidStatus GetComputeTPCProbability (const AliVTrack *track, Int_t nSpecies, Double_t p[]) const;

@@ -29,6 +29,8 @@ typedef struct {
   Float_t ptMC;
   Float_t etaMC;
   Float_t phiMC;
+  Float_t drMC;
+  Float_t dzMC;
   //
   Int_t nrec;
   //
@@ -65,8 +67,8 @@ typedef struct {
 
 trSumm tSum;
 
-void testFantr(const char* inpTreeName ,int ntrials=-1, double dndy=2100., Bool_t useKalmanOut=kTRUE);
-void testFantr(TTree* inpTree ,int ntrials=-1, double dndy=2100., Bool_t useKalmanOut=kTRUE);
+void testFantr(const char* inpTreeName ,int ntrials=-1, double dndy=2100.*3, Bool_t useKalmanOut=kTRUE);
+void testFantr(TTree* inpTree ,int ntrials=-1, double dndy=2100.*3, Bool_t useKalmanOut=kTRUE);
 
 void SetInpTree(TTree* inpTree);
 void BookTree(const char* treeFile, const char* treeName, const char* treeTitle="SummaryTree");
@@ -182,6 +184,8 @@ void SetInpTree(TTree* inpTree)
   inpTree->SetBranchAddress("ptMC", &tSum.ptMC);
   inpTree->SetBranchAddress("etaMC", &tSum.etaMC);
   inpTree->SetBranchAddress("phiMC", &tSum.phiMC);
+  inpTree->SetBranchAddress("drMC", &tSum.drMC);
+  inpTree->SetBranchAddress("dzMC", &tSum.dzMC);
   //
   inpTree->SetBranchAddress("nrec", &tSum.nrec);
   //
@@ -228,6 +232,8 @@ void BookTree(const char* treeFile, const char* treeName, const char* treeTitle)
   treeOut->Branch("ptMC", &tSum.ptMC ,"ptMC/F");
   treeOut->Branch("etaMC", &tSum.etaMC ,"etaMC/F");
   treeOut->Branch("phiMC", &tSum.phiMC ,"phiMC/F");
+  treeOut->Branch("drMC", &tSum.drMC ,"drMC/F");
+  treeOut->Branch("dzMC", &tSum.dzMC ,"dzMC/F");
   //
   treeOut->Branch("nrec", &tSum.nrec ,"nrec/I");
   //
