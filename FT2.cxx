@@ -53,6 +53,7 @@ fITSRec(0)
   ,fMinTPCHits(60)
   ,fMinITSLrHit(4)
   ,fProbe()
+  ,fProbeIni()
   ,fKalmanOutward(0)
   ,fUseKalmanOut(kTRUE)
   //,fProbeMass(0.14)
@@ -413,6 +414,7 @@ Bool_t FT2::InitProbe(TParticle* part)
   fProbe.Set(xref, alpha, param, covar);
   ResetCovMat(&fProbe);
   fTPCMap.ResetAllBits();
+  fProbeIni = fProbe;
   return kTRUE;
 }
 
@@ -669,6 +671,7 @@ Bool_t FT2::ReconstructProbe()
 #endif
   //
   // ITS tracking
+  if (fUseKalmanOut) MakeITSKalmanOut();
   int maxMiss = fITS->GetNLayersActive() - fMinITSLrHit;
   int nMiss = 0;
   for (int ilr=fITS->GetNLayersActive();ilr--;) {
@@ -757,10 +760,6 @@ Bool_t FT2::PropagateToX(double xTgt, int dir,
 {
   // propagate track to given X
   //
-  Bool_t doKalmanOut = kFALSE;
-  if (simMat && dir>0 && fUseKalmanOut && xTgt<fITS->GetRMax()) {
-    doKalmanOut = kTRUE;
-  }
   double maxStep = useTGeo ? fgMaxStepTGeo : 1e6;
   //
   Double_t xyz0[3],xyz1[3],param[7];
@@ -771,10 +770,10 @@ Bool_t FT2::PropagateToX(double xTgt, int dir,
   while ( dir*(xTgt-fProbe.GetX()) > kTrackToler) {
     Double_t step = dir*TMath::Min(TMath::Abs(xTgt-fProbe.GetX()), maxStep);
     Double_t x    = fProbe.GetX()+step;
-    Bool_t res = (propErr||doKalmanOut) ? fProbe.PropagateTo(x,fBz) : fProbe.PropagateParamOnlyTo(x,fBz);
+    Bool_t res = propErr ? fProbe.PropagateTo(x,fBz) : fProbe.PropagateParamOnlyTo(x,fBz);
     if (!res)  {
 #if DEBUG
-      printf("Failed Prop PropagateToX(%.1f,%d,%d,%d,%d) doKalmanOut=%d",xTgt,dir,propErr,simMat,useTGeo,doKalmanOut);
+      printf("Failed Prop PropagateToX(%.1f,%d,%d,%d,%d)",xTgt,dir,propErr,simMat,useTGeo);
       fProbe.Print();
 #endif
       return kFALSE;
@@ -787,22 +786,11 @@ Bool_t FT2::PropagateToX(double xTgt, int dir,
       if (simMat) {
 	if (!ApplyMSEloss(xx0,xrho)) {
 #if DEBUG
-	  printf("Failed ApplyMSEloss(%f,%f) in PropagateToX(%.1f,%d,%d,%d,%d)  doKalmanOut=%d",
-		 xx0,xrho,xTgt,dir,propErr,simMat,useTGeo,doKalmanOut);
+	  printf("Failed ApplyMSEloss(%f,%f) in PropagateToX(%.1f,%d,%d,%d,%d)",
+		 xx0,xrho,xTgt,dir,propErr,simMat,useTGeo);
 	  fProbe.Print();
 #endif
 	  return kFALSE;
-	}
-	if (doKalmanOut) { // special mode for outward kalman: we don't want to affect params by materials since
-	  // it is already done, onle cov.matrix need to be updated
-	  AliExternalTrackParam trTmp = fProbe;
-	  if (!trTmp.CorrectForMeanMaterial(xx0,xrho,fProbe.fProbeMass,kTRUE)) {
-#if DEBUG
-	    printf("Failed MatCorr(%f %f) in PropagateToX(%.1f,%d,%d,%d,%d) for doKalmanOut",xx0,xrho,xTgt,dir,propErr,simMat,useTGeo);
-	      trTmp.Print();
-#endif
-	  }
-	  memcpy((double*)fProbe.GetCovariance(),trTmp.GetCovariance(),15*sizeof(double)); // restore parameter
 	}
       }
       else if (!fProbe.CorrectForMeanMaterial(xx0,xrho,fProbe.fProbeMass,kTRUE)) {
@@ -963,14 +951,11 @@ Bool_t FT2::GetRoadWidth(AliITSURecoLayer* lrA,double *pr, Int_t nstd)
 Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
 {
   // pass the layer and register the hits
-  static AliExternalTrackParam prbBackup;
   Double_t trImpData[AliITSUTrackerGlo::kNTrImpData];
   AliITSUGeomTGeo* gm = fITS->GetGeom();
   //
   int lrAID = lr->GetActiveID();
   AliITSURecoSens **hitSens = &fITSSensCand[lrAID][0];
-  //
-  ((double*)fKalmanOutward[lrAID].GetCovariance())[0] = -1; // invalidate outward track
   //
   if (!GetRoadWidth(lr, trImpData, -1)) return kFALSE;
   fNITSHits[lrAID] = 0;
@@ -1013,11 +998,9 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
     nsens=2;
   }
   //
-  ((double*)prbBackup.GetCovariance())[0] = -1; // invalidate backup track
-  //
   for (int isn=0;isn<nsens;isn++) {
     AliITSURecoSens* sens =  hitSens[idxHit[isn]];
-    Bool_t res = fUseKalmanOut ? fProbe.Rotate(sens->GetPhiTF()) : fProbe.RotateParamOnly(sens->GetPhiTF());
+    Bool_t res = fProbe.RotateParamOnly(sens->GetPhiTF());
     if (!res) {
 #if DEBUG
       printf("Failed to rotate for sens %d ",isn); sens->Print();
@@ -1042,7 +1025,6 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
       sens->Print();
       segm->Print();
 #endif
-      prbBackup = fProbe;
       continue; // not in the active zone
     }
     // register hit
@@ -1056,35 +1038,8 @@ Bool_t FT2::PassActiveITSLayer(AliITSURecoLayer* lr)
     printf("Register hit %d at lr%d\n",fNITSHits[lrAID],lr->GetActiveID());
     fProbe.Print();
 #endif
-    // emulate outward Kalman track
-    if (fUseKalmanOut) {
-      AliExternalTrackParam& trKO = fKalmanOutward[lrAID];
-      if (((double*)trKO.GetCovariance())[0]<0) {
-	trKO = fProbe;
-	AliExternalTrackParam trKOUp = fProbe;
-	double chi = UpdateKalman(&trKOUp,fITSHitYZ[lrAID][nh][0],fITSHitYZ[lrAID][nh][1],
-				  fSigYITS,fSigZITS,kTRUE,fITSerrSclY,fITSerrSclZ);
-	if (chi<0) {
-	  printf("Failed on emulating outward Kalman on lr %d\n",lrAID);
-	  trKOUp.Print();
-	  return kFALSE;
-	}
-	// assign updated error matrix to fProbe
-	memcpy((double*)fProbe.GetCovariance(),trKOUp.GetCovariance(),15*sizeof(double));
-      } // update for outward Kalman
-    }
   }
   //
-  // check if the "forward Kalman was registered
-  if (fKalmanOutward[lrAID].GetSigmaY2()<0) { // no hit was registered
-    if (prbBackup.GetSigmaY2()>0) { // but the probe at least was propagated to some sensor
-      fKalmanOutward[lrAID] = prbBackup;
-    }
-    else {
-      if (!PropagateToR(lr->GetRMax(),1,kFALSE,fSimMat,fSimMat)) return kFALSE; // go to nominal radius
-      fKalmanOutward[lrAID] = fProbe;
-    }
-  }
   //
   return kTRUE;
 }
@@ -1191,10 +1146,8 @@ Int_t FT2::ReconstructOnITSLayer(int ilr, double chi2Cut)
 #endif
   AliITSURecoSens* sens = 0;
   int iht = -1;
-  if (fNITSHits[ilr]) { 
-    // for 2 hits (overlap) chose only 1
-    iht = fNITSHits[ilr]==1 ? 0 : (gRandom->Rndm()>0.5 ? 0:1);
-    sens = fITSSensHit[ilr][iht];
+  if (fNITSHits[ilr]) {  // for >1 hits (overlap) chose only 1st ons
+    sens = fITSSensHit[ilr][0];
   }
   else { // there was no hit but fake may be picked
     Double_t trImpData[AliITSUTrackerGlo::kNTrImpData];
@@ -1260,8 +1213,14 @@ Int_t FT2::ReconstructOnITSLayer(int ilr, double chi2Cut)
       else { // correlated component
 	double sy,sz;
 	gRandom->Rannor(sy,sz);
-	yzf[0] = trPos[0] + sy*GetCorrelITSFakesSigY(ilr);
-	yzf[1] = trPos[1] + sz*GetCorrelITSFakesSigZ(ilr);
+	if (iht>=0) { // there was a true hit, put the accompanying hits around
+	  yzf[0] = fITSHitYZ[ilr][iht][0] + sy*GetCorrelITSFakesSigY(ilr);
+	  yzf[1] = fITSHitYZ[ilr][iht][1] + sz*GetCorrelITSFakesSigZ(ilr);
+	}
+	else {
+	  yzf[0] = trPos[0] + sy*GetCorrelITSFakesSigY(ilr);
+	  yzf[1] = trPos[1] + sz*GetCorrelITSFakesSigZ(ilr);	  
+	}
       }
       //      double chi2 = fProbe.GetPredictedChi2(yzf,yzcov);
       double chi2 = trSmooth->GetPredictedChi2(yzf,yzcov);
@@ -1357,4 +1316,43 @@ const AliExternalTrackParam* FT2::GetSmoothedEstimate(int ilr,const AliExternalT
   }
   //
   return &trJoint;
+}
+
+//_____________________________________________
+Bool_t FT2::MakeITSKalmanOut()
+{
+  // prepare kalman outward track
+  // save probe kinematics
+  //  
+  int lr0 = 0;
+  for (lr0=0;lr0<fITS->GetNLayersActive();lr0++) {
+    ((double*)fKalmanOutward[lrAID].GetCovariance())[0] = -1; // invalidate outward track
+    if (fNITSHits[lr0]<1) continue;
+    break;
+  }
+  if (lr0>=fITS->GetNLayersActive()) return; // 1st hit layer
+  //
+  AliExternalTrackParam prbSav = fProbe;
+  ResetCovMat(&fProbeIni);
+  fProbe = fProbeIni;
+  //
+  AliITSURecoSens* sens = 0;
+  int nclAdd = 0;
+  for (int ilA=lr0;ilA<fITS->GetNLayersActive();ilA++) {
+    AliITSURecoLayer* lrA = fITS->GetLayerActive(ilA);
+    if (fNITSHits[ilA]<1 && nclAdd) { // no hits
+      if (!PropagateToR(lrA->GetRMax(),1,kTRUE,kFALSE,fSimMat)) {fProbe = prbSav; return kFALSE;}
+      fKalmanOutward[ilA] = fProbe;
+      continue;
+    }
+    sens = fITSSensHit[ilA][0];
+    if (!fProbe.Rotate(sens->GetPhiTF()) || !PropagateToX(sens->GetXTF(),1,kTRUE, kFALSE, kTRUE)) {fProbe = prbSav; return kFALSE;}
+    fKalmanOutward[ilA] = fProbe;
+    //
+    double chi2l = UpdateKalman(&fProbe,fITSHitYZ[ilA][0][0],fITSHitYZ[ilA][0][1],fSigYITS,fSigZITS,kTRUE,fITSerrSclY,fITSerrSclZ);
+    if (chi2l<0) {fProbe = prbSav; return kFALSE;}
+  }
+  //
+  fProbe = prbSav;  // restore
+  return kTRUE;
 }

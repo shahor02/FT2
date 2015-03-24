@@ -67,7 +67,7 @@ typedef struct {
 
 trSumm tSum;
 
-void testFantr(const char* inpTreeName ,int ntrials=-1, double dndy=2100.*3, Bool_t useKalmanOut=kTRUE);
+void testFantr(const char* inpTreeName="trsf.root",int ntrials=-1, double dndy=2100., Bool_t useKalmanOut=kTRUE);
 void testFantr(TTree* inpTree ,int ntrials=-1, double dndy=2100.*3, Bool_t useKalmanOut=kTRUE);
 
 void SetInpTree(TTree* inpTree);
