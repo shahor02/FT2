@@ -39,7 +39,7 @@ class FTProbe : public AliExternalTrackParam
   Double_t fAbsPdgCode;	// pdg code of particle
   Int_t fAbsPdgCodeForTracking;
   ClassDef(FTProbe,1)
-    };
+};
 
 
 class FT2 : public TObject
